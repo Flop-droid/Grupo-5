@@ -1,0 +1,256 @@
+#include <Arduino.h>
+
+//Primeiramente vamos definir todas os dados que trarão informações importantes para o 
+// funcionamento do código.
+
+// Definir os pinos dos drivers de cada um dos motores
+int MotorEsquerdo_PWM = 5;
+int MotorEsquerdo_Inp1 = 6;
+int MotorEsquerdo_Inp2 = 7;
+int MotorDireito_PWM = 8;
+int MotorDireito_Inp3 = 9;
+int MotorDireito_Inp4 = 10;
+
+// Definir os pinos para operação do sensor ultrassônico
+int Ultrassonico_Trigger = 3;
+int Ultrassonico_Echo = 2;
+
+
+// Dados do sensor ultrassônico - failing e rising
+unsigned long Tempo_raising_SensorUltrassonico = 0;
+unsigned long Tempo_falling_SensorUltrassonico = 0;
+unsigned long Tempo_pulso_SensorUltrassonico;
+
+// Limite para detecção do oponente
+// Existem 2 situações criadas a partir dele
+// Caso a distancia calculada pelo sensor ultrassônico seja maior que esse valor, o oponente não é localizado
+// Porém caso a distancia calculada seja menor ou igual ao valor estipulado, encontra-se o oponente.
+int limite_deteccao_oponente = 35;
+
+
+// Tempo entre os disparos e o dado que forneça um 'reset' para a contagem de tempo dos disparo
+int Tempo_entre_disparos = 5;
+unsigned long Reset_dos_disparos = 0;
+
+
+
+
+// Agora será feito o código de funcionamento do sensor ultrassônico
+// Pois através do duty cicle, haverá uma frequência para a quantidade de vezes que 
+// seram consultadas a distância pelo tempo de propagação entre trigger e echo.
+
+/**
+ * @brief ISR é o momento em que o loop é interrompido para que seja executada alguma ação prevista no código
+ */
+
+
+// Função que retorna o tempo que ocorre o falling do Ultrassônico (ISR)
+void Falling_Ultrassonico();
+
+// Função Rising do Ultrassônico (ISR)
+void Rising_Ultrassonico() {
+
+  // Armazenar o tempo de subida do cycle do sensor ultrassonico
+  Tempo_raising_SensorUltrassonico = micros();
+  
+  // Determina a forma como deve ocorrer a rotina de interrupção pelo pino que se encontra conectado ao Echo do sensor ultrassônico,
+  // Quando o mesmo está no estado de Rising
+  attachInterrupt(digitalPinToInterrupt(Ultrassonico_Echo), Falling_Ultrassonico, FALLING);
+}
+
+
+// Função Falling do Ultrassônico (ISR)
+void Falling_Ultrassonico() {
+  // Armazena a marcação de tempo da descida do sinal
+  Tempo_falling_SensorUltrassonico = micros();
+  
+  // Calcular quanto tempo o pulso do sinal fica em um só estado
+  Tempo_pulso_SensorUltrassonico = Tempo_falling_SensorUltrassonico - Tempo_raising_SensorUltrassonico;
+  
+  // Configura a rotina de interrupção para o pino conectado ao echo do sensor ultrassônico no modo RISING
+  attachInterrupt(digitalPinToInterrupt(Ultrassonico_Echo), Rising_Ultrassonico, RISING);
+}
+
+// Aqui ocorre o cálculo da distância, mediante a forma como é ensinada no datasheet do Sensor Ultrassônico
+// Distância de Teste = (tempo de pulso × velocidade do som(0.034)) /2
+float calculo_da_distancia() {
+  return (Tempo_pulso_SensorUltrassonico * 0.034) / 2.;
+}
+
+
+
+/**
+ * @brief Ajuda a saber o que o robo deve fazer, de acordo, com o valor encontrado, 
+ * seja continuar buscando ou perseguir o oponente.
+ * 
+ * @param distancia é o que deve ser calculado pelo sensor ultrassônico 
+ * 
+ */
+
+
+//fazer brief de distancia
+bool Oponente_detectado(double distancia) {
+  // Se a distância do sensor for menor que o limite de detecção retorna-se verdadeiro
+  if (distancia < limite_deteccao_oponente) {
+    return true;
+  }
+  // Caso contrário, retorna falso
+  else {
+    return false;
+  }
+}
+
+
+
+// Nessa função o robo fica lento, justamente para procurar o oponente de forma mais segura
+void Buscando_o_oponente() {
+  // O motor direito gira no sentido contrário
+  analogWrite(MotorDireito_PWM, 200);
+  digitalWrite(MotorDireito_Inp3, LOW);
+  digitalWrite(MotorDireito_Inp4, HIGH);
+
+  // E o motor esquerdo fica com velocidade reduzida
+  analogWrite(MotorEsquerdo_PWM, 200);
+  digitalWrite(MotorEsquerdo_Inp1, HIGH);
+  digitalWrite(MotorEsquerdo_Inp2, LOW);
+}
+
+
+
+
+// Já nessa função, após o robo localizar a posição do oponente.
+// Os motores são orientados para se mover em velocidade máxima em direção ao oponente
+void Perseguindo_o_oponente() {
+  
+  analogWrite(MotorEsquerdo_PWM, 250);
+  digitalWrite(MotorEsquerdo_Inp1, HIGH);
+  digitalWrite(MotorEsquerdo_Inp2, LOW);
+  
+  // O motor direito aqui irá girar na mesma posição que o esquerdo, com a mesma velocidade 
+  // que o motor esquerdo
+  analogWrite(MotorDireito_PWM, 250);
+  digitalWrite(MotorDireito_Inp3, HIGH);
+  digitalWrite(MotorDireito_Inp4, LOW);
+}
+
+
+
+// Agora faremos os processos com o fotoresistor que agirá como um sensor de cor
+
+//Pino do fotoresistor definido
+int fot_resit = A2;
+
+// É o limite para detecção da borda
+// Para valores menores que o limite, a borna é identificada
+// Já para valores maiores, a borda não é identificada
+int limite_deteccao_borda = 25;
+
+
+
+/**
+ * @brief Pelo fotoresistor, verificamos se a borda está próxima ou não
+ * 
+ * @param leitura_foto é o dado que é obtido pelo fotoresistor.
+ * 
+ */
+
+bool Deteccao_borda(int leitura_foto) {
+  // Se a distância do sensor for maior que o limite, retorna falso
+  if (leitura_foto < limite_deteccao_borda) {
+    return true;
+  }
+  // Caso contrário, se for menor retorna verdadeiro
+  else {
+    return false;
+  }
+}
+
+
+
+// Função que recua da borda, fazendo com que os motores girem para trás
+void Sai_da_borda() {
+  // Motor direito vai girar rapidamente no mesmo sentido que o esquerdo
+  analogWrite(MotorDireito_PWM, 255);
+  digitalWrite(MotorDireito_Inp3, LOW);
+  digitalWrite(MotorDireito_Inp4, HIGH);
+
+  // Motor esquerdo girará rapidamente para trás
+  analogWrite(MotorEsquerdo_PWM, 255);
+  digitalWrite(MotorEsquerdo_Inp1, LOW);
+  digitalWrite(MotorEsquerdo_Inp2, HIGH);
+}
+
+
+
+// Reunidas as funções e dados necessários para o projeto, 
+// partimos para as configurações inicias do robo, e em seguida o loop (rotina) que o tal deve seguir.
+
+void setup() {
+  // Inicia o funcionamento do monitor serial
+  Serial.begin(9600);
+  
+  //Definindo os pinos de entrada para o driver dos motores
+  pinMode(MotorEsquerdo_Inp1, OUTPUT);
+  pinMode(MotorEsquerdo_Inp2, OUTPUT);
+  pinMode(MotorDireito_Inp3, OUTPUT);
+  pinMode(MotorDireito_Inp4, OUTPUT);
+  
+  //Definir o pino que produz o trigger no sensor ultrassônico
+  pinMode(Ultrassonico_Trigger, OUTPUT);
+
+  //Rotina de funcionamento, que depende da comunicação fornecida
+  //pelo pino em que o Echo está conectado para ativação do sensor 
+  //Ultrassônico quando o mesmo entra no estado Rising
+  attachInterrupt(digitalPinToInterrupt(Ultrassonico_Echo), Rising_Ultrassonico, RISING);
+}
+
+void loop() {
+
+  //Primeiro, o loop do sensor ultrassônico
+  // Trigger em HIGH
+  digitalWrite(Ultrassonico_Trigger, HIGH);
+  
+  // Verificação do pino trigger
+  if (micros() - Reset_dos_disparos >= Tempo_entre_disparos) {
+    // Se passou, desliga o pino trigger
+    digitalWrite(Ultrassonico_Trigger, LOW);
+    
+    // Armazena o tempo do disparo
+    Reset_dos_disparos = micros();
+  }
+  
+  // Calcula a distância do sensor ultrassônico
+  double distancia = calculo_da_distancia();
+  
+  // Verifica se o oponente foi detectado
+  bool oponenteLocalizado = Oponente_detectado(distancia);
+  
+  // Caso o oponente tenha sido localizado, executa a perseguição
+  if (oponenteLocalizado) {
+    Perseguindo_o_oponente();
+  }
+
+  // Senão, executa a busca
+  else {
+    Buscando_o_oponente();
+  }
+
+
+  // Em segundo,  teremos o loop do fotoresistor
+   // Lê o valor do fotorresistor
+  int Valor_Resistor = analogRead(fot_resit);
+  
+  // Retorna verdadeiro ou falso, dependendo da visualização ou não da borda
+  bool Localizacao = Deteccao_borda(Valor_Resistor);
+  
+
+  
+  // Mostra no monitor serial a distância obtida pelo sensor ultrassônico e a leitura do fotorresistor
+  Serial.print("Distancia Atual do Objeto: ");
+  Serial.print(distancia);
+  Serial.print(" | ");
+
+  Serial.print("Valor Atual do Fotoresistor: ");
+  Serial.println(Valor_Resistor);
+  Serial.print(" | ");
+}
