@@ -1,0 +1,212 @@
+// Definição dos pinos do sensor ultrassônico
+const int trigger = 3;
+const int echo = 2;
+
+// Definição dos pinos do driver dos motores
+const int PWMDoMotorEsquerdo = 10;
+const int Entrada1DoMotorEsquerdo = 9;
+const int Entrada2DoMotorEsquerdo = 8;
+const int PWMDoMotorDireito = 5;
+const int Entrada3DoMotorDireito = 6;
+const int Entrada4DoMotorDireito = 7;
+
+// Definição do pino do fotoresistor
+const int fotorresistor = A0;
+
+// Variáveis para armazenar os dados do sensor ultrassônico
+unsigned long tempoDoRisingDoSensorUltrassonico = 0;
+unsigned long tempoDoFallingDoSensorUltrassonico = 0;
+unsigned long tempoDoPulsoDoSensorUltrassonico;
+
+// Variável para armazenar o tempo do último disparo do pino trigger
+unsigned long tempoDoUltimoDisparo = 0;
+
+// Variável para armazenar o tempo (em us) entre cada disparo do pino trigger
+int tempoEntreDisparos = 10;
+
+// Constante com o limite de detecção do oponente
+// Para distâncias maiores que ele o oponente não foi detectado
+// Para distâncias menores que ele o oponente foi detectado
+const double LIMITE_DE_DETECCAO_DE_OPONENTE = 15;
+
+// Constante com o limite de detecção de borda
+// Para valores maiores que ele a borda não foi detectada
+// Para valores menores que ele a borda foi detectada
+const int LIMITE_DE_DETECCAO_DE_BORDA = 100;
+
+// Protótipo da função fallingISRDoUltrassonico()
+void fallingISRDoUltrassonico();
+
+// Função ISR de RISING do sensor ultrassônico
+void risingISRDoUltrassonico() {
+  // Armazena a marcação de tempo da subida do sinal
+  tempoDoRisingDoSensorUltrassonico = micros();
+  
+  // Configura a rotina de interrupção para o pino conectado ao echo do sensor ultrassônico no modo FALLING
+  attachInterrupt(digitalPinToInterrupt(echo), fallingISRDoUltrassonico, FALLING);
+}
+
+// Função ISR de FALLING do sensor ultrassônico
+void fallingISRDoUltrassonico() {
+  // Armazena a marcação de tempo da descida do sinal
+  tempoDoFallingDoSensorUltrassonico = micros();
+  
+  // Calcula o tempo do pulso do sinal
+  tempoDoPulsoDoSensorUltrassonico = tempoDoFallingDoSensorUltrassonico - tempoDoRisingDoSensorUltrassonico;
+  
+  // Configura a rotina de interrupção para o pino conectado ao echo do sensor ultrassônico no modo RISING
+  attachInterrupt(digitalPinToInterrupt(echo), risingISRDoUltrassonico, RISING);
+}
+
+/**
+ * @brief Função para calcular a distância a partir da largura do pulso recebida pelo sensor ultrassônico.
+ * 
+ * @return A distância em cm.
+ */
+double calcularDistancia() {
+  // Retorna a distância
+  // d(cm) = t(us) * 0.034 / 2
+  return tempoDoPulsoDoSensorUltrassonico * 0.034 / 2.;
+}
+
+/**
+ * @brief Função que verifica se o oponente foi detectado ou não a partir da leitura do sensor ultrassônico.
+ * 
+ * @param distancia Distância obtida a partir do sensor ultrassônico.
+ * 
+ * @return Verdadeiro se o oponente foi detectado ou falso se não foi.
+ */
+bool oponenteFoiDetectado(double distancia) {
+  // Se a distância do sensor for maior que o limite, retorna falso
+  if (distancia > LIMITE_DE_DETECCAO_DE_OPONENTE) {
+    return false;
+  }
+  // Caso contrário, se for menor retorna verdadeiro
+  else {
+    return true;
+  }
+}
+
+/**
+ * @brief Função que verifica se a borda foi detectada ou não a partir da leitura do fotorresistor.
+ * 
+ * @param leitura Leitura obtida a partir do fotorresistor.
+ * 
+ * @return Verdadeiro se a borda foi detectada ou falso se não foi.
+ */
+bool bordaFoiDetectada(int leitura) {
+  // Se a distância do sensor for maior que o limite, retorna falso
+  if (leitura < LIMITE_DE_DETECCAO_DE_BORDA) {
+    return true;
+  }
+  // Caso contrário, se for menor retorna verdadeiro
+  else {
+    return false;
+  }
+}
+
+// Função para girar o robô no próprio eixo
+// Utilizada para localizar o oponente
+void buscarOponente() {
+  // Coloca o motor esquerdo para girar em um sentido com velocidade reduzida
+  analogWrite(PWMDoMotorEsquerdo, 200);
+  digitalWrite(Entrada1DoMotorEsquerdo, HIGH);
+  digitalWrite(Entrada2DoMotorEsquerdo, LOW);
+  
+  // Coloca o motor direito para girar no sentido oposto
+  analogWrite(PWMDoMotorDireito, 200);
+  digitalWrite(Entrada3DoMotorDireito, LOW);
+  digitalWrite(Entrada4DoMotorDireito, HIGH);
+}
+
+// Função para mover o robô para trás
+// Utilizada para recuar da borda
+void recuarDaBorda() {
+  // Coloca o motor esquerdo para girar com velocidade máxima para trás
+  analogWrite(PWMDoMotorEsquerdo, 255);
+  digitalWrite(Entrada1DoMotorEsquerdo, LOW);
+  digitalWrite(Entrada2DoMotorEsquerdo, HIGH);
+  
+  // Coloca o motor direito para girar no mesmo sentido com velocidade máxima
+  analogWrite(PWMDoMotorDireito, 255);
+  digitalWrite(Entrada3DoMotorDireito, LOW);
+  digitalWrite(Entrada4DoMotorDireito, HIGH);
+}
+
+// Função para mover o robô para frente
+// Utilizada para perseguir o oponente
+void perseguirOponente() {
+  // Coloca o motor esquerdo para girar com velocidade máxima para frente
+  analogWrite(PWMDoMotorEsquerdo, 255);
+  digitalWrite(Entrada1DoMotorEsquerdo, HIGH);
+  digitalWrite(Entrada2DoMotorEsquerdo, LOW);
+  
+  // Coloca o motor direito para girar no mesmo sentido com velocidade máxima
+  analogWrite(PWMDoMotorDireito, 255);
+  digitalWrite(Entrada3DoMotorDireito, HIGH);
+  digitalWrite(Entrada4DoMotorDireito, LOW);
+}
+
+void setup() {
+  // Inicia o monitor serial
+  Serial.begin(9600);
+  
+  // Define os pinos de entrada do driver do motor com o modo OUTPUT
+  pinMode(Entrada1DoMotorEsquerdo, OUTPUT);
+  pinMode(Entrada2DoMotorEsquerdo, OUTPUT);
+  pinMode(Entrada3DoMotorDireito, OUTPUT);
+  pinMode(Entrada4DoMotorDireito, OUTPUT);
+  
+  // Define o pino conectado ao trigger do sensor ultrassônico com o modo OUTPUT
+  pinMode(trigger, OUTPUT);
+  
+  // Configura a rotina de interrupção para o pino conectado ao echo do sensor ultrassônico no modo RISING
+  attachInterrupt(digitalPinToInterrupt(echo), risingISRDoUltrassonico, RISING);
+}
+
+void loop() {
+  // Coloca o pino trigger no estado HIGH
+  digitalWrite(trigger, HIGH);
+  
+  // Verifica se passou o tempo para desligar o pino trigger
+  if (micros() - tempoDoUltimoDisparo >= tempoEntreDisparos) {
+    // Se passou, desliga o pino trigger
+    digitalWrite(trigger, LOW);
+    
+    // Armazena o tempo do disparo
+    tempoDoUltimoDisparo = micros();
+  }
+  
+  // Calcula a distância do sensor ultrassônico
+  double distancia = calcularDistancia();
+  
+  // Verifica se o oponente foi detectado
+  bool oponenteLocalizado = oponenteFoiDetectado(distancia);
+  
+  // Lê o valor do fotorresistor
+  int leituraDoFotorresistor = analogRead(fotorresistor);
+  
+  // Verifica se a borda foi localizada
+  bool bordaLocalizada = bordaFoiDetectada(leituraDoFotorresistor);
+  
+  // Caso o oponente tenha sido localizado, executa a perseguição
+  if (oponenteLocalizado) {
+    perseguirOponente();
+  }
+  // Senão se a borda foi detectada, recua da borda
+  else if (bordaLocalizada) {
+    recuarDaBorda();
+  }
+  // Senão, executa a busca
+  else {
+    buscarOponente();
+  }
+  
+  // Mostra no monitor serial a distância obtida pelo sensor ultrassônico e a leitura do fotorresistor
+  Serial.print("Distancia: ");
+  Serial.print(distancia);
+  Serial.print(" | ");
+  Serial.print("Fotorresistor: ");
+  Serial.println(leituraDoFotorresistor);
+}
+
